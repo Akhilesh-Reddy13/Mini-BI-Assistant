@@ -1,0 +1,8 @@
+.env
+**/__pycache__/
+**/*.py[cod]
+backend/.pytest-tmp/
+backend/.pytest_cache/
+frontend/node_modules/
+frontend/dist/
+data/*.sqlite3
