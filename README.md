@@ -102,7 +102,7 @@ cd mini-bi-assistant\backend
 pytest -q
 ```
 
-The default test suite uses isolated temporary SQLite databases and mocked Groq calls; it does not need a Groq API key or network access. To test the real Groq API, set `GROQ_API_KEY` in the same terminal and run `pytest -q --run-groq-live -m groq_live` from `backend`. This makes six short provider requests; the default `pytest -q` never calls the live API. See [TESTING.md](docs/TESTING.md).
+The default test suite uses isolated temporary SQLite databases and mocked Groq calls; it does not need a Groq API key or network access. Live Groq integration testing has also been performed using the opt-in suite. To repeat it, set `GROQ_API_KEY` in the same terminal and run `pytest -q --run-groq-live -m groq_live` from `backend`; this makes six short provider requests. The default `pytest -q` never calls the live API. See [TESTING.md](docs/TESTING.md) for the observed result and coverage details.
 
 ## Architecture and AI development report
 
@@ -115,7 +115,7 @@ The default test suite uses isolated temporary SQLite databases and mocked Groq 
 - Currency is not present in the CSV. Amounts are displayed without a currency symbol and use a two-decimal storage assumption.
 - Returns are excluded rather than netted because refund amounts and returned quantities are absent.
 - The local fallback parser supports only common phrasings and requires explicit years for month comparisons. Use clear wording if a question is not understood.
-- Groq response validation and fallback behavior are covered by mocked tests, but a live Groq request has not been verified with a user API key.
+- Groq was exercised through live API requests; all six opt-in cases passed with the strict JSON Schema response format, including month comparison.
 - Category, region, channel, and status values are validated against values observed in the supplied file. New valid dimension values require updating the importer allowlists.
 - The app is designed for one local dataset and demonstration use. It has no authentication, roles, hosted deployment setup, or large-scale query optimization.
 - The React interface has been production-built; it does not yet have a separate automated browser test suite.
