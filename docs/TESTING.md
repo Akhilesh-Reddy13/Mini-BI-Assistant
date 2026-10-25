@@ -1,6 +1,6 @@
 # Automated tests
 
-The backend test suite uses pytest and temporary SQLite databases. It does not depend on the supplied production database, network access, or Groq credentials.
+The default backend suite uses pytest and temporary SQLite databases. It does not depend on the supplied production database, network access, or Groq credentials. Live Groq tests are separate and run only when explicitly enabled.
 
 Run from the backend directory:
 
@@ -8,6 +8,15 @@ Run from the backend directory:
 cd backend
 pytest -q
 ```
+
+To send six short requests to the real Groq API, set the key in the same PowerShell session and opt in:
+
+```powershell
+$env:GROQ_API_KEY = "your-groq-api-key"
+pytest -q --run-groq-live -m groq_live
+```
+
+These cases call Groq directly through `classify_with_groq`, which has no local fallback. Each requires `source == "groq"`; a missing key skips the cases, while a provider or classification failure fails them. Regular `pytest -q` always skips live cases, even when a key is configured, to avoid unexpected requests or usage charges.
 
 `pytest.ini` directs temporary test databases to an ignored project-local directory because some managed environments do not permit writes to the default user-profile temp path.
 
@@ -22,7 +31,8 @@ pytest -q
 - Groq output validation, unexpected-field rejection, timeout/API-failure fallback, local intent recognition, and ambiguous month clarification without external network calls or credentials.
 - FastAPI health, success dispatch, unsupported and malformed requests, invalid parameters, and database-error responses with internal details hidden.
 - End-to-end natural-language requests through local intent fallback, FastAPI, and analytics; adversarial SQL-like wording; and Groq failure fallback with provider details hidden.
+- Opt-in live Groq cases for all five intents and one unsupported question; these are excluded from the default run.
 - Import rejection reporting for missing price and impossible date; retaining zero quantity.
 - Idempotent repeat imports, all-invalid import protection, duplicate transaction IDs, and invalid CSV headers.
 
-The API tests use FastAPI's `TestClient` and an injected temporary database. At this stage, the verified suite contains 44 passing test cases.
+The API tests use FastAPI's `TestClient` and an injected temporary database. The offline suite currently has 51 passing cases; six live cases are skipped unless explicitly enabled.

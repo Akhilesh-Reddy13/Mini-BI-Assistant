@@ -59,7 +59,7 @@ In the same PowerShell window, before starting the API:
 
 ```powershell
 $env:GROQ_API_KEY = "your-groq-api-key"
-$env:GROQ_MODEL = "llama-3.3-70b-versatile"
+$env:GROQ_MODEL = "openai/gpt-oss-120b"
 ```
 
 The API key is read only by the backend. Do not put it in the frontend or commit it. If you omit the key, the deterministic fallback parser is used. The Groq adapter, configuration, and limitations are described in [INTERPRETATION.md](docs/INTERPRETATION.md).
@@ -102,7 +102,7 @@ cd mini-bi-assistant\backend
 pytest -q
 ```
 
-Tests use isolated temporary SQLite databases and mock Groq calls. They do not need a Groq API key or network access. Current coverage includes data import, all five analytics, intent validation/fallback, API error responses, and full natural-language-to-database paths. See [TESTING.md](docs/TESTING.md).
+The default test suite uses isolated temporary SQLite databases and mocked Groq calls; it does not need a Groq API key or network access. To test the real Groq API, set `GROQ_API_KEY` in the same terminal and run `pytest -q --run-groq-live -m groq_live` from `backend`. This makes six short provider requests; the default `pytest -q` never calls the live API. See [TESTING.md](docs/TESTING.md).
 
 ## Architecture and AI development report
 

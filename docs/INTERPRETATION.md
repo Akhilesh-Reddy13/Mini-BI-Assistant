@@ -4,7 +4,7 @@ The Groq adapter in `backend/app/interpreter.py` maps each question to one of fi
 
 ## Groq request
 
-When `GROQ_API_KEY` is present, the backend sends a Chat Completions request to `https://api.groq.com/openai/v1/chat/completions`. The default model is `llama-3.3-70b-versatile`; it can be changed with `GROQ_MODEL`. The request uses temperature zero, a short output limit, a timeout, and JSON mode. The prompt asks only for a supported intent and parameters. Month comparison parameters must be explicit, distinct `YYYY-MM` values.
+When `GROQ_API_KEY` is present, the backend calls the official Groq Python SDK's Chat Completions client (which targets `https://api.groq.com/openai/v1/chat/completions`). This replaces the raw `urllib` request that received Cloudflare Error 1010 in the live test. The default model is `openai/gpt-oss-120b`; it can be changed with `GROQ_MODEL`. Groq currently lists this model and supports JSON Object Mode and Structured Outputs for it. The request uses temperature zero, a short output limit, a timeout, disables automatic retries, and requests JSON Object Mode. The prompt asks only for a supported intent and parameters. Month comparison parameters must be explicit, distinct `YYYY-MM` values.
 
 The response is treated as untrusted data. The backend parses JSON and requires exactly `intent` and `parameters`; intent must be whitelisted; month values are validated as real calendar months; all unexpected parameters are rejected. A failure, malformed JSON, or invalid classification never reaches analytics as a model-produced answer.
 
@@ -16,7 +16,7 @@ Set these environment variables in the backend process:
 
 ```text
 GROQ_API_KEY=your_key
-GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_MODEL=openai/gpt-oss-120b
 GROQ_TIMEOUT_SECONDS=8
 ```
 
@@ -27,3 +27,5 @@ The key must remain on the backend and must not be committed or sent to the brow
 - [Groq Chat Completions API reference](https://console.groq.com/docs/api-reference)
 - [Groq Structured Outputs and JSON mode](https://console.groq.com/docs/structured-outputs)
 - [Groq supported models](https://console.groq.com/docs/models)
+- [Groq GPT-OSS 120B model details](https://console.groq.com/docs/model/openai/gpt-oss-120b)
+- [Groq Structured Outputs support](https://console.groq.com/docs/structured-outputs)

@@ -1,14 +1,32 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import httpx
 import pytest
+from groq import APIStatusError
 
 from app.interpreter import (
+    DEFAULT_GROQ_MODEL,
     InvalidQuestion,
     Interpretation,
     GroqError,
+    classify_with_groq,
     interpret_question,
     validate_classification,
 )
+
+
+class _FakeGroqClient:
+    def __init__(self, completion_create):
+        completions = SimpleNamespace(create=completion_create)
+        self.chat = SimpleNamespace(completions=completions)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return False
 
 
 @pytest.mark.parametrize(
@@ -73,6 +91,159 @@ def test_groq_classification_is_validated_and_marked_as_groq(monkeypatch):
     result = interpret_question("top product", api_key="test-secret")
 
     assert result == Interpretation("top_product", source="groq")
+
+
+def test_direct_groq_classification_has_no_fallback(monkeypatch):
+    monkeypatch.setattr(
+        "app.interpreter._call_groq",
+        lambda *args: {"intent": "total_revenue", "parameters": {}},
+    )
+
+    result = classify_with_groq("total revenue", api_key="test-secret")
+
+    assert result.intent == "total_revenue"
+    assert result.source == "groq"
+
+
+def test_direct_groq_classification_requires_a_key():
+    with pytest.raises(GroqError, match="not configured"):
+        classify_with_groq("total revenue", api_key="")
+
+
+def test_gpt_oss_120b_is_the_default_model(monkeypatch):
+    selected_model = {}
+
+    def capture_model(question, api_key, model, timeout):
+        selected_model["model"] = model
+        return {"intent": "total_revenue", "parameters": {}}
+
+    monkeypatch.delenv("GROQ_MODEL", raising=False)
+    monkeypatch.setattr("app.interpreter._call_groq", capture_model)
+
+    result = classify_with_groq("total revenue", api_key="test-secret")
+
+    assert result.intent == "total_revenue"
+    assert selected_model["model"] == "openai/gpt-oss-120b"
+    assert DEFAULT_GROQ_MODEL == "openai/gpt-oss-120b"
+
+
+def test_groq_sdk_request_uses_strict_json_schema_and_closes_client(monkeypatch):
+    from app.interpreter import _call_groq
+
+    client_args = {}
+    request_args = {}
+    completion = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content='{"intent":"total_revenue","from_month":"","to_month":""}'))]
+    )
+
+    def create_client(**kwargs):
+        client_args.update(kwargs)
+
+        def create_completion(**request_kwargs):
+            request_args.update(request_kwargs)
+            return completion
+
+        return _FakeGroqClient(create_completion)
+
+    monkeypatch.setattr("app.interpreter.Groq", create_client)
+    result = _call_groq("total revenue", "test-secret", "test-model", 12)
+
+    assert result == {"intent": "total_revenue", "parameters": {}}
+    assert client_args == {"api_key": "test-secret", "timeout": 12, "max_retries": 0}
+    assert request_args["model"] == "test-model"
+    response_format = request_args["response_format"]
+    assert response_format["type"] == "json_schema"
+    assert response_format["json_schema"]["strict"] is True
+    assert response_format["json_schema"]["schema"]["required"] == [
+        "intent", "from_month", "to_month"
+    ]
+    assert request_args["reasoning_effort"] == "low"
+    assert request_args["temperature"] == 0
+
+
+def test_groq_flat_schema_normalizes_month_comparison(monkeypatch):
+    from app.interpreter import _call_groq
+
+    completion = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content='{"intent":"compare_months","from_month":"2026-01","to_month":"2026-02"}'
+                )
+            )
+        ]
+    )
+    fake_client = _FakeGroqClient(lambda **kwargs: completion)
+    monkeypatch.setattr("app.interpreter.Groq", lambda **kwargs: fake_client)
+
+    result = _call_groq("compare January and February 2026", "test-secret", "test-model", 10)
+
+    assert result == {
+        "intent": "compare_months",
+        "parameters": {"from_month": "2026-01", "to_month": "2026-02"},
+    }
+
+
+def test_http_error_is_diagnostic_and_redacts_credentials(monkeypatch):
+    secret = "gsk_testSecret123"
+
+    def rejected_request(**kwargs):
+        response = httpx.Response(
+            401,
+            request=httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions"),
+            content=('{"error":{"message":"Invalid API key ' + secret + '"}}').encode(),
+        )
+        raise APIStatusError("Unauthorized", response=response, body=None)
+
+    monkeypatch.setattr("app.interpreter.Groq", lambda **kwargs: _FakeGroqClient(rejected_request))
+
+    from app.interpreter import _call_groq
+
+    with pytest.raises(GroqError, match="HTTP 401: Invalid API key") as exc_info:
+        _call_groq("total revenue", secret, "test-model", 10)
+
+    assert secret not in str(exc_info.value)
+    assert "[redacted]" in str(exc_info.value)
+
+
+def test_http_error_includes_groq_permission_code(monkeypatch):
+    def forbidden_request(**kwargs):
+        body = (
+            '{"error":{"message":"The model is blocked at the project level.",'
+            '"type":"permissions_error","code":"model_permission_blocked_project"}}'
+        ).encode()
+        response = httpx.Response(
+            403,
+            request=httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions"),
+            content=body,
+        )
+        raise APIStatusError("Forbidden", response=response, body=None)
+
+    monkeypatch.setattr("app.interpreter.Groq", lambda **kwargs: _FakeGroqClient(forbidden_request))
+
+    from app.interpreter import _call_groq
+
+    with pytest.raises(GroqError, match="HTTP 403") as exc_info:
+        _call_groq("total revenue", "test-secret", "test-model", 10)
+
+    assert "model_permission_blocked_project" in str(exc_info.value)
+
+
+def test_http_error_includes_sanitized_plain_text_body(monkeypatch):
+    def forbidden_request(**kwargs):
+        response = httpx.Response(
+            403,
+            request=httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions"),
+            content=b"Access denied by upstream gateway",
+        )
+        raise APIStatusError("Forbidden", response=response, body=None)
+
+    monkeypatch.setattr("app.interpreter.Groq", lambda **kwargs: _FakeGroqClient(forbidden_request))
+
+    from app.interpreter import _call_groq
+
+    with pytest.raises(GroqError, match="HTTP 403: Access denied by upstream gateway"):
+        _call_groq("total revenue", "test-secret", "test-model", 10)
 
 
 def test_groq_month_parameters_must_be_valid(monkeypatch):

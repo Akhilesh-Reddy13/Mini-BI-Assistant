@@ -14,6 +14,24 @@ from app.database import initialize_database  # noqa: E402
 from app.importer import EXPECTED_HEADERS, import_csv  # noqa: E402
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--run-groq-live",
+        action="store_true",
+        default=False,
+        help="run tests that make real Groq API requests",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--run-groq-live"):
+        return
+    skip_live = pytest.mark.skip(reason="pass --run-groq-live to make real Groq API requests")
+    for item in items:
+        if "groq_live" in item.keywords:
+            item.add_marker(skip_live)
+
+
 def transaction(
     transaction_id: str,
     date: str,
